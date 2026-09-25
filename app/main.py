@@ -11,12 +11,19 @@ from app.api.v1.health import router as health_router
 setup_logging()
 
 
+from app.workers.repair_worker import repair_worker
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     # Initialize DB tables and baseline seeds
     await init_db()
+    # Start background self-healing repair worker
+    repair_worker.start()
     yield
+    # Stop background worker
+    repair_worker.stop()
     logger.info(f"Shutting down {settings.APP_NAME}")
 
 

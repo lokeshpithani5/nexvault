@@ -8,6 +8,7 @@ from app.repositories.event_repository import EventRepository
 from app.repositories.repair_repository import RepairRepository
 from app.models.object_replica import ObjectReplica
 from app.services.node_client import node_client
+from app.services.repair_service import RepairService
 from app.schemas.chaos import ChaosOperationResponse
 from app.core.exceptions import ResourceNotFoundError
 from app.core.logging_config import logger
@@ -71,23 +72,17 @@ class ChaosService:
         # Actively bring the physical storage daemon online
         await node_client.bring_node_online(node.host, node.port)
 
-        node.status = "HEALTHY"
-        node.is_simulated_partitioned = False
-        await self.session.flush()
+        # Run node restoration reconciliation (verifies replicas, checks health, restores HEALTHY)
+        repair_svc = RepairService(self.session)
+        rec_res = await repair_svc.reconcile_node_restoration(node_id)
 
-        await self.event_repo.log_event(
-            event_type="NODE_RESTORED",
-            severity="INFO",
-            category="NODE",
-            message=f"Node {node.name} restored and brought online (Port {node.port}, {node.zone})",
-            details_json={"node_id": node.id, "node_name": node.name, "port": node.port},
-        )
         return ChaosOperationResponse(
             success=True,
             operation="NODE_RESTORE",
             message=f"Node {node.name} successfully restored to HEALTHY and brought online",
-            affected_entities={"node_id": node.id, "status": "HEALTHY", "port": node.port},
+            affected_entities={"node_id": node.id, "status": "HEALTHY", "port": node.port, "reconciliation": rec_res},
         )
+
 
     async def network_partition(self, node_ids: List[str], partitioned: bool = True) -> ChaosOperationResponse:
         await self.node_repo.set_partition_state(node_ids, partitioned)
@@ -195,12 +190,20 @@ class ChaosService:
             message=f"Integrity sweep completed: {len(replicas)} replicas verified, {corrupt_count} corruptions detected",
             details_json={"total_scanned": len(replicas), "corrupted_found": corrupt_count},
         )
+        # Automatic repair reconciliation for detected corruptions
+        repair_svc = RepairService(self.session)
+        repairs_performed = []
+        if corrupt_count > 0:
+            rec_result = await repair_svc.run_cluster_reconciliation()
+            repairs_performed = rec_result.get("repair_results", [])
+
         return ChaosOperationResponse(
             success=True,
             operation="INTEGRITY_SCAN",
-            message=f"Scanned {len(replicas)} replicas. Detected {corrupt_count} corrupted replicas.",
-            affected_entities={"scanned": len(replicas), "corrupted": corrupt_count},
+            message=f"Scanned {len(replicas)} replicas. Detected {corrupt_count} corrupted replicas. Repaired {len(repairs_performed)} replicas.",
+            affected_entities={"scanned": len(replicas), "corrupted": corrupt_count, "repaired": len(repairs_performed)},
         )
+
 
     async def rebalance(self) -> ChaosOperationResponse:
         await self.event_repo.log_event(

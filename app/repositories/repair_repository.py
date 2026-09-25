@@ -38,3 +38,16 @@ class RepairRepository:
         stmt = select(RepairJob).where(RepairJob.status.in_(["PENDING", "IN_PROGRESS"]))
         result = await self.session.execute(stmt)
         return len(list(result.scalars().all()))
+
+    async def get_active_job_for_version(self, version_id: str) -> Optional[RepairJob]:
+        stmt = (
+            select(RepairJob)
+            .where(
+                RepairJob.version_id == version_id,
+                RepairJob.status.in_(["PENDING", "IN_PROGRESS"]),
+            )
+            .order_by(RepairJob.started_at.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().first()

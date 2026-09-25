@@ -34,11 +34,25 @@ async def setup_database_engine():
                 f"Primary database connection failed ({e}). "
                 f"Falling back to local SQLite engine ({settings.SQLITE_FALLBACK_URL}) for continuous operation."
             )
-            _engine = create_async_engine(settings.SQLITE_FALLBACK_URL, echo=False)
+            _engine = create_async_engine(
+                settings.SQLITE_FALLBACK_URL,
+                echo=False,
+                connect_args={"timeout": 30.0},
+            )
             active_db_type = "sqlite"
         else:
             logger.error(f"Failed to connect to database: {e}")
             raise e
+
+    if active_db_type == "sqlite" and _engine is not None:
+        from sqlalchemy import event
+
+        @event.listens_for(_engine.sync_engine, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.close()
 
     _async_session_factory = async_sessionmaker(
         bind=_engine,

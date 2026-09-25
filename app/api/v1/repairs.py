@@ -69,3 +69,16 @@ async def execute_repair_job(
     result = await service.execute_repair(job_id)
     await db.commit()
     return result
+
+
+@router.post("/reconcile")
+async def trigger_cluster_reconciliation(
+    admin_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin-only: Triggers an immediate cluster-wide durability scan & automatic repair cycle."""
+    service = RepairService(db)
+    result = await service.run_cluster_reconciliation()
+    await db.commit()
+    return result
+

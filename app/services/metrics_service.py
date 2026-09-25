@@ -38,7 +38,7 @@ class MetricsService:
             select(Object)
             .where(Object.is_deleted == False)
             .options(
-                selectinload(Object.versions).selectinload(ObjectVersion.replicas),
+                selectinload(Object.versions).selectinload(ObjectVersion.replicas).selectinload(ObjectReplica.node),
                 selectinload(Object.bucket).selectinload(Bucket.policy),
             )
         )
@@ -63,17 +63,30 @@ class MetricsService:
             if obj.bucket and obj.bucket.policy:
                 required_rf = obj.bucket.policy.replication_factor
 
-            healthy_reps_count = sum(1 for r in latest_v.replicas if r.status == "HEALTHY")
+            healthy_reps_count = sum(
+                1 for r in latest_v.replicas
+                if r.status == "HEALTHY"
+                and r.node
+                and r.node.status == "HEALTHY"
+                and not r.node.is_simulated_partitioned
+            )
             if healthy_reps_count >= required_rf:
                 healthy_objects += 1
             else:
                 degraded_objects += 1
 
         # 3. Replica Metrics
-        reps_res = await self.session.execute(select(ObjectReplica))
+        reps_res = await self.session.execute(select(ObjectReplica).options(selectinload(ObjectReplica.node)))
         all_replicas = list(reps_res.scalars().all())
         total_replicas = len(all_replicas)
-        healthy_replicas = sum(1 for r in all_replicas if r.status == "HEALTHY")
+        healthy_replicas = sum(
+            1 for r in all_replicas
+            if r.status == "HEALTHY"
+            and r.node
+            and r.node.status == "HEALTHY"
+            and not r.node.is_simulated_partitioned
+        )
+
         corrupted_replicas = sum(1 for r in all_replicas if r.status == "CORRUPTED")
 
         # 4. Storage Overhead
@@ -107,10 +120,7 @@ class MetricsService:
         scan_event_stmt = (
             select(Event)
             .where(
-                or_(
-                    Event.category == "INTEGRITY",
-                    Event.event_type.in_(["INTEGRITY_SCAN_COMPLETED", "INTEGRITY_SCAN_STARTED"]),
-                )
+                Event.event_type.in_(["INTEGRITY_SCAN_COMPLETED", "INTEGRITY_SCAN_STARTED"])
             )
             .order_by(Event.timestamp.desc())
             .limit(1)
