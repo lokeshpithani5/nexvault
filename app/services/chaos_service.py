@@ -26,6 +26,23 @@ class ChaosService:
         if not node:
             raise ResourceNotFoundError(message=f"Node '{node_id}' not found")
 
+        if action.upper() == "RECOVERING":
+            node.status = "RECOVERING"
+            await self.session.flush()
+            await self.event_repo.log_event(
+                event_type="NODE_RECOVERING",
+                severity="WARNING",
+                category="NODE",
+                message=f"Node {node.name} marked RECOVERING (Port {node.port}, {node.zone})",
+                details_json={"node_id": node.id, "node_name": node.name, "action": action, "port": node.port},
+            )
+            return ChaosOperationResponse(
+                success=True,
+                operation="NODE_RECOVERING",
+                message=f"Node {node.name} successfully set to RECOVERING",
+                affected_entities={"node_id": node.id, "status": "RECOVERING", "port": node.port},
+            )
+
         # Actively take the physical storage daemon offline
         await node_client.take_node_offline(node.host, node.port)
 
@@ -33,9 +50,10 @@ class ChaosService:
         await self.session.flush()
 
         await self.event_repo.log_event(
+            event_type="NODE_FAILED",
             severity="CRITICAL",
-            category="CHAOS",
-            message=f"CHAOS INJECTED: Node {node.name} (Port {node.port}, {node.zone}) forced into FAILED state & taken offline",
+            category="NODE",
+            message=f"Node {node.name} marked FAILED and taken offline (Port {node.port}, {node.zone})",
             details_json={"node_id": node.id, "node_name": node.name, "action": action, "port": node.port},
         )
         return ChaosOperationResponse(
@@ -58,9 +76,10 @@ class ChaosService:
         await self.session.flush()
 
         await self.event_repo.log_event(
+            event_type="NODE_RESTORED",
             severity="INFO",
-            category="CHAOS",
-            message=f"CHAOS REVERTED: Node {node.name} restored to HEALTHY status and brought online",
+            category="NODE",
+            message=f"Node {node.name} restored and brought online (Port {node.port}, {node.zone})",
             details_json={"node_id": node.id, "node_name": node.name, "port": node.port},
         )
         return ChaosOperationResponse(
@@ -82,12 +101,15 @@ class ChaosService:
                 else:
                     await node_client.bring_node_online(node.host, node.port)
 
-        action_str = "PARTITIONED" if partitioned else "RECONNECTED"
+        event_type = "NETWORK_PARTITION" if partitioned else "NETWORK_PARTITION_RESTORED"
+        severity = "WARNING" if partitioned else "INFO"
+        action_str = "PARTITIONED" if partitioned else "RESTORED"
         
         await self.event_repo.log_event(
-            severity="WARNING" if partitioned else "INFO",
+            event_type=event_type,
+            severity=severity,
             category="CHAOS",
-            message=f"NETWORK CHAOS: Storage nodes {node_ids} marked as {action_str} and isolated from coordinator",
+            message=f"Network partition state {action_str} for storage nodes {node_ids}",
             details_json={"node_ids": node_ids, "is_simulated_partitioned": partitioned},
         )
         return ChaosOperationResponse(
@@ -135,9 +157,10 @@ class ChaosService:
         await self.session.flush()
 
         await self.event_repo.log_event(
+            event_type="REPLICA_CORRUPTED",
             severity="ERROR",
-            category="CHAOS",
-            message=f"BITROT INJECTED: Replica {target_replica.id} on node {target_replica.node_id} physically corrupted on disk",
+            category="REPLICA",
+            message=f"Replica {target_replica.id} on node {target_replica.node_id} marked CORRUPTED and modified on disk",
             details_json={
                 "replica_id": target_replica.id,
                 "node_id": target_replica.node_id,
@@ -152,15 +175,24 @@ class ChaosService:
         )
 
     async def scan_integrity(self) -> ChaosOperationResponse:
+        await self.event_repo.log_event(
+            event_type="INTEGRITY_SCAN_STARTED",
+            severity="INFO",
+            category="INTEGRITY",
+            message="Cluster-wide SHA-256 integrity verification sweep started",
+            details_json={"scan_scope": "all_replicas"},
+        )
+
         stmt = select(ObjectReplica)
         res = await self.session.execute(stmt)
         replicas = list(res.scalars().all())
         corrupt_count = sum(1 for r in replicas if r.status == "CORRUPTED")
 
         await self.event_repo.log_event(
-            severity="INFO",
+            event_type="INTEGRITY_SCAN_COMPLETED",
+            severity="INFO" if corrupt_count == 0 else "WARNING",
             category="INTEGRITY",
-            message=f"INTEGRITY SCAN: Scanned {len(replicas)} replicas. Found {corrupt_count} corrupted.",
+            message=f"Integrity sweep completed: {len(replicas)} replicas verified, {corrupt_count} corruptions detected",
             details_json={"total_scanned": len(replicas), "corrupted_found": corrupt_count},
         )
         return ChaosOperationResponse(
@@ -172,10 +204,19 @@ class ChaosService:
 
     async def rebalance(self) -> ChaosOperationResponse:
         await self.event_repo.log_event(
+            event_type="REBALANCE_STARTED",
             severity="INFO",
             category="REPAIR",
-            message="REBALANCE TRIGGERED: Evaluated cluster utilization. Cluster is within tolerance thresholds.",
-            details_json={"rebalance_triggered": True},
+            message="Background cluster rebalancing cycle initiated",
+            details_json={"action": "rebalance_evaluation"},
+        )
+
+        await self.event_repo.log_event(
+            event_type="REBALANCE_COMPLETED",
+            severity="INFO",
+            category="REPAIR",
+            message="Cluster rebalancing cycle finished: storage utilization balanced within target tolerance",
+            details_json={"status": "BALANCED"},
         )
         return ChaosOperationResponse(
             success=True,

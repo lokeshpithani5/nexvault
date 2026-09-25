@@ -114,6 +114,7 @@ class NodeService:
                 if old_status in ["FAILED", "DEGRADED"]:
                     node.status = "HEALTHY"
                     event = await self.event_repo.log_event(
+                        event_type="NODE_RESTORED",
                         severity="INFO",
                         category="NODE",
                         message=f"Node {node.name} (Port {node.port}, {node.zone}) heartbeat restored. Status: {old_status} -> HEALTHY",
@@ -127,7 +128,9 @@ class NodeService:
                     node.status = new_status
                     severity = "WARNING" if node.is_simulated_partitioned else "CRITICAL"
                     reason = "simulated network partition" if node.is_simulated_partitioned else "connection timeout / process down"
+                    event_type = "NETWORK_PARTITION" if node.is_simulated_partitioned else "NODE_FAILED"
                     event = await self.event_repo.log_event(
+                        event_type=event_type,
                         severity=severity,
                         category="NODE",
                         message=f"Node {node.name} (Port {node.port}, {node.zone}) heartbeat lost ({reason}). Status: {old_status} -> {new_status}",

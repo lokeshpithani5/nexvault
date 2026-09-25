@@ -9,7 +9,8 @@ class Event(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True, nullable=False)
+    event_type = Column(String(64), index=True, nullable=True)     # e.g. 'NODE_FAILED', 'WRITE_SUCCESS', etc.
     severity = Column(String(16), default="INFO", nullable=False)  # 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
-    category = Column(String(32), index=True, nullable=False)      # 'NODE', 'REPLICA', 'INTEGRITY', 'REPAIR', 'CHAOS', 'AUTH'
+    category = Column(String(32), index=True, nullable=False)      # 'NODE', 'REPLICA', 'INTEGRITY', 'REPAIR', 'CHAOS', 'AUTH', 'OBJECT'
     message = Column(String(512), nullable=False)
     details_json = Column(JSON, default=dict, nullable=False)

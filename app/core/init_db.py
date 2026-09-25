@@ -24,6 +24,12 @@ async def init_db():
             )
         except Exception:
             pass  # column already exists or table was just created with it
+        try:
+            await conn.execute(
+                text("ALTER TABLE events ADD COLUMN event_type VARCHAR(64)")
+            )
+        except Exception:
+            pass  # column already exists
     logger.info("Database schema creation verified.")
 
     session_factory = get_session_factory()

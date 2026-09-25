@@ -202,10 +202,12 @@ class StorageService:
         # 8. Emit structured event
         node_names = [n.name for n, _ in successful_replicas]
         severity = "WARNING" if is_degraded else "INFO"
+        event_type = "WRITE_DEGRADED" if is_degraded else "WRITE_SUCCESS"
         await self.event_repo.log_event(
+            event_type=event_type,
             severity=severity,
             category="OBJECT",
-            message=f"Object '{key}' v{version_num} uploaded to '{bucket_name}' across {node_names} (Degraded: {is_degraded})",
+            message=f"Object '{key}' v{version_num} written to '{bucket_name}' across {node_names} ({event_type})",
             details_json={
                 "bucket": bucket_name,
                 "key": key,
@@ -217,6 +219,14 @@ class StorageService:
                 "availability_mode": avail_mode,
             },
         )
+        if is_degraded:
+            await self.event_repo.log_event(
+                event_type="OBJECT_DEGRADED",
+                severity="WARNING",
+                category="OBJECT",
+                message=f"Object '{key}' in bucket '{bucket_name}' entered DEGRADED state ({len(successful_replicas)}/{bucket.policy.replication_factor} replicas)",
+                details_json={"bucket": bucket_name, "key": key, "healthy_replicas": len(successful_replicas), "target_rf": bucket.policy.replication_factor},
+            )
 
         # Build response DTO
         replica_dtos = [
@@ -321,9 +331,10 @@ class StorageService:
                     rep.status = "CORRUPTED"
                     await self.session.flush()
                     await self.event_repo.log_event(
+                        event_type="READ_FAILOVER",
                         severity="ERROR",
                         category="INTEGRITY",
-                        message=f"Data corruption detected during read on replica {rep.id} (node {rep.node.name})",
+                        message=f"Data corruption detected during read on replica {rep.id} (node {rep.node.name}) - triggering failover",
                         details_json={"replica_id": rep.id, "node_name": rep.node.name, "expected": target_version.sha256_checksum},
                     )
                     continue
