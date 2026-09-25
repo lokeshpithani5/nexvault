@@ -15,6 +15,7 @@ class Policy(Base):
     parity_shards = Column(Integer, default=2, nullable=False)
     min_write_quorum = Column(Integer, default=2, nullable=False)
     min_read_quorum = Column(Integer, default=1, nullable=False)
+    availability_mode = Column(String(32), default="DURABILITY_FIRST", nullable=False)  # 'DURABILITY_FIRST', 'AVAILABILITY_FIRST'
     description = Column(Text, nullable=True)
 
     buckets = relationship("Bucket", back_populates="policy")

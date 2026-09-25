@@ -1,20 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field, ConfigDict
-
-
-class PolicyResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    name: str
-    type: str
-    replication_factor: int
-    data_shards: int
-    parity_shards: int
-    min_write_quorum: int
-    min_read_quorum: int
-    description: Optional[str] = None
+from app.schemas.policy import PolicyResponse
 
 
 class BucketCreateRequest(BaseModel):

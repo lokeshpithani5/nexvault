@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import select, text
 from app.core.config import settings
 from app.core.database import setup_database_engine, get_engine, get_session_factory, Base
 from app.core.security import get_password_hash
@@ -17,11 +17,18 @@ async def init_db():
     logger.info("Initializing database schema...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Safe migration for availability_mode if table was created in an earlier revision
+        try:
+            await conn.execute(
+                text("ALTER TABLE policies ADD COLUMN availability_mode VARCHAR(32) DEFAULT 'DURABILITY_FIRST'")
+            )
+        except Exception:
+            pass  # column already exists or table was just created with it
     logger.info("Database schema creation verified.")
 
     session_factory = get_session_factory()
     async with session_factory() as session:
-        # 1. Seed Default Durability Policies
+        # 1. Seed Durability & Availability Policies
         policies = [
             Policy(
                 name="standard-rf3",
@@ -29,7 +36,17 @@ async def init_db():
                 replication_factor=3,
                 min_write_quorum=2,
                 min_read_quorum=1,
-                description="Default 3-way replication distributed across Zone A and Zone B with quorum write",
+                availability_mode="DURABILITY_FIRST",
+                description="Default 3-way replication across Zone A & B with strict quorum (Durability First)",
+            ),
+            Policy(
+                name="available-rf3",
+                type="REPLICATION",
+                replication_factor=3,
+                min_write_quorum=2,
+                min_read_quorum=1,
+                availability_mode="AVAILABILITY_FIRST",
+                description="3-way replication prioritizing availability during network partitions or degraded states",
             ),
             Policy(
                 name="light-rf2",
@@ -37,6 +54,7 @@ async def init_db():
                 replication_factor=2,
                 min_write_quorum=2,
                 min_read_quorum=1,
+                availability_mode="DURABILITY_FIRST",
                 description="2-way cross-zone replication for low overhead",
             ),
             Policy(
@@ -47,18 +65,21 @@ async def init_db():
                 parity_shards=2,
                 min_write_quorum=4,
                 min_read_quorum=4,
-                description="Reed-Solomon 4 data + 2 parity shards across 6 nodes",
+                availability_mode="DURABILITY_FIRST",
+                description="Predefined Reed-Solomon 4 data + 2 parity shards across 6 nodes",
             ),
         ]
         for pol in policies:
             stmt = select(Policy).where(Policy.name == pol.name)
             res = await session.execute(stmt)
-            if not res.scalars().first():
+            existing = res.scalars().first()
+            if not existing:
                 session.add(pol)
-                logger.info(f"Seeded durability policy: {pol.name}")
+                logger.info(f"Seeded durability policy: {pol.name} ({pol.availability_mode})")
+            else:
+                existing.availability_mode = pol.availability_mode
 
         # 2. Seed 6 Storage Nodes
-        # Ports 5001-5003 in Zone A, 5004-5006 in Zone B
         node_configs = [
             ("node-01", 5001, "Zone-A"),
             ("node-02", 5002, "Zone-A"),

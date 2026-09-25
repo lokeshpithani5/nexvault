@@ -68,7 +68,7 @@ class StorageService:
         await self.event_repo.log_event(
             severity="INFO",
             category="OBJECT",
-            message=f"Bucket '{bucket.name}' created by {current_user.email}",
+            message=f"Bucket '{bucket.name}' created by {current_user.email} (Policy: {bucket.policy.name if bucket.policy else 'standard'})",
             details_json={"bucket_id": bucket.id, "owner_id": current_user.id, "policy_id": policy_id},
         )
         return BucketResponse(
@@ -140,7 +140,7 @@ class StorageService:
 
         # 4. Fetch available nodes and select target placement
         available_nodes = await self.node_repo.get_healthy_available_nodes()
-        target_nodes = placement_engine.select_nodes_for_placement(available_nodes, bucket.policy)
+        target_nodes, is_degraded = placement_engine.select_nodes_for_placement(available_nodes, bucket.policy)
 
         # 5. Concurrently write chunks to target storage nodes
         write_tasks = []
@@ -159,17 +159,19 @@ class StorageService:
             if isinstance(res, Exception):
                 logger.warning(f"Failed to write replica {replica_id} to node {node.name}: {res}")
             else:
-                # verify node checksum
                 if res.get("sha256") == sha256_checksum:
                     successful_replicas.append((node, replica_id))
                     node.used_capacity_bytes += size_bytes
                 else:
                     logger.error(f"Checksum mismatch reported by node {node.name} for replica {replica_id}")
 
-        if len(successful_replicas) < bucket.policy.min_write_quorum:
+        avail_mode = getattr(bucket.policy, "availability_mode", "DURABILITY_FIRST")
+        min_required = 1 if (avail_mode == "AVAILABILITY_FIRST" and is_degraded) else bucket.policy.min_write_quorum
+
+        if len(successful_replicas) < min_required:
             raise QuorumNotReachedError(
-                message=f"Write quorum failed. Required {bucket.policy.min_write_quorum}, succeeded {len(successful_replicas)}",
-                details={"required": bucket.policy.min_write_quorum, "succeeded": len(successful_replicas)},
+                message=f"Write quorum failed. Required {min_required} (Mode: {avail_mode}), succeeded {len(successful_replicas)}",
+                details={"required": min_required, "succeeded": len(successful_replicas), "mode": avail_mode},
             )
 
         # 7. Record Version & Replicas in Control Plane
@@ -199,10 +201,11 @@ class StorageService:
 
         # 8. Emit structured event
         node_names = [n.name for n, _ in successful_replicas]
+        severity = "WARNING" if is_degraded else "INFO"
         await self.event_repo.log_event(
-            severity="INFO",
+            severity=severity,
             category="OBJECT",
-            message=f"Object '{key}' v{version_num} uploaded to bucket '{bucket_name}' across nodes {node_names}",
+            message=f"Object '{key}' v{version_num} uploaded to '{bucket_name}' across {node_names} (Degraded: {is_degraded})",
             details_json={
                 "bucket": bucket_name,
                 "key": key,
@@ -210,6 +213,8 @@ class StorageService:
                 "size": size_bytes,
                 "sha256": sha256_checksum,
                 "nodes": node_names,
+                "is_degraded": is_degraded,
+                "availability_mode": avail_mode,
             },
         )
 
@@ -265,7 +270,6 @@ class StorageService:
         if not obj:
             raise ResourceNotFoundError(message=f"Object '{key}' not found in bucket '{bucket_name}'")
 
-        # Select targeted or latest version
         target_version = None
         if version_num is not None:
             for v in obj.versions:
@@ -287,14 +291,12 @@ class StorageService:
         if target_version.is_tombstone:
             raise ResourceNotFoundError(message=f"Object version {target_version.version_num} is a tombstone")
 
-        # Prioritize healthy replicas on online non-partitioned nodes
         eligible_replicas = [
             r for r in target_version.replicas
             if r.status == "HEALTHY" and r.node and r.node.status == "HEALTHY" and not r.node.is_simulated_partitioned
         ]
 
         if not eligible_replicas:
-            # Fallback to any replica not explicitly marked corrupted
             eligible_replicas = [r for r in target_version.replicas if r.status != "CORRUPTED" and r.node]
 
         if not eligible_replicas:
@@ -303,7 +305,6 @@ class StorageService:
                 details={"replicas_total": len(target_version.replicas)},
             )
 
-        # Attempt retrieval with transparent failover across replicas
         last_error = None
         for rep in eligible_replicas:
             try:
@@ -325,9 +326,8 @@ class StorageService:
                         message=f"Data corruption detected during read on replica {rep.id} (node {rep.node.name})",
                         details_json={"replica_id": rep.id, "node_name": rep.node.name, "expected": target_version.sha256_checksum},
                     )
-                    continue  # Transparent failover to next replica
+                    continue
 
-                # Success
                 filename = key.split("/")[-1]
                 return data, target_version.content_type, target_version.sha256_checksum, filename
 
@@ -350,7 +350,6 @@ class StorageService:
 
         next_version_num = await self.object_repo.get_next_version_num(obj.id)
 
-        # Create tombstone version
         tombstone = await self.object_repo.create_version(
             object_id=obj.id,
             version_num=next_version_num,
