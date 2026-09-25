@@ -14,6 +14,16 @@ STORAGE_DIR: Path = Path("./storage/node_default")
 NODE_ID: str = "node-unknown"
 NODE_PORT: int = 5000
 NODE_ZONE: str = "Zone-A"
+IS_OFFLINE: bool = False
+
+
+@app.middleware("http")
+async def offline_middleware(request: Request, call_next):
+    global IS_OFFLINE
+    # Allow chaos control endpoints even when node is marked offline
+    if IS_OFFLINE and request.url.path not in ["/chaos/online", "/chaos/offline"]:
+        return Response(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=b"Node is OFFLINE (Chaos simulated outage)")
+    return await call_next(request)
 
 
 def get_paths(replica_id: str):
@@ -161,6 +171,20 @@ async def corrupt_chunk(replica_id: str):
             f.truncate()
 
     return {"corrupted": True, "replica_id": replica_id}
+
+
+@app.post("/chaos/offline")
+async def take_offline():
+    global IS_OFFLINE
+    IS_OFFLINE = True
+    return {"status": "OFFLINE", "node_id": NODE_ID, "port": NODE_PORT}
+
+
+@app.post("/chaos/online")
+async def bring_online():
+    global IS_OFFLINE
+    IS_OFFLINE = False
+    return {"status": "ONLINE", "node_id": NODE_ID, "port": NODE_PORT}
 
 
 def run_daemon(node_id: str, port: int, storage_dir: str, zone: str):

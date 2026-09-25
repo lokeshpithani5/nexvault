@@ -83,5 +83,23 @@ class NodeClient:
         except httpx.RequestError:
             return False
 
+    async def take_node_offline(self, host: str, port: int) -> bool:
+        url = f"http://{host}:{port}/chaos/offline"
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                res = await client.post(url)
+                return res.status_code == 200
+        except httpx.RequestError:
+            return False
+
+    async def bring_node_online(self, host: str, port: int) -> bool:
+        url = f"http://{host}:{port}/chaos/online"
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                res = await client.post(url)
+                return res.status_code == 200
+        except httpx.RequestError:
+            return False
+
 
 node_client = NodeClient()
