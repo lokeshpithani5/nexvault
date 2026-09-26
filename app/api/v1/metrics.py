@@ -27,3 +27,17 @@ async def get_cluster_summary_metrics(
     """Admin-only: Returns concise dashboard-friendly cluster health and durability summary."""
     service = MetricsService(db)
     return await service.get_cluster_summary()
+
+
+cluster_router = APIRouter(tags=["Cluster Overview"])
+
+
+@cluster_router.get("/admin/cluster", response_model=Dict[str, Any])
+@cluster_router.get("/cluster/overview", response_model=Dict[str, Any])
+async def get_admin_cluster_overview(
+    admin_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Direct alias for frontend admin dashboard cluster overview."""
+    service = MetricsService(db)
+    return await service.get_cluster_summary()

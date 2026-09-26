@@ -17,6 +17,17 @@ class NodeRepository:
     async def get_by_id(self, node_id: str) -> Optional[StorageNode]:
         stmt = select(StorageNode).where(StorageNode.id == node_id)
         result = await self.session.execute(stmt)
+        node = result.scalars().first()
+        if node:
+            return node
+        if str(node_id).isdigit():
+            idx = int(node_id)
+            port = 5000 + idx if idx < 100 else idx
+            node = await self.get_by_port(port)
+            if node:
+                return node
+        stmt = select(StorageNode).where(StorageNode.name == str(node_id))
+        result = await self.session.execute(stmt)
         return result.scalars().first()
 
     async def get_by_port(self, port: int) -> Optional[StorageNode]:
