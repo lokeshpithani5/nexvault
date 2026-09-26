@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+
+# Database & Runtime logs
+*.db
+*.db-shm
+*.db-wal
+*.log
+coordinator.log
+coordinator_pid.json
+nodes_pids.json
+
+# Storage blobs (data plane runtime)
+storage/node*/*.blob
+storage/node*/*.tmp
+
+# Frontend (managed by Teja on main)
+frontend/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
