@@ -1,4 +1,4 @@
-# Python
+# Python & Bytecode
 __pycache__/
 *.py[cod]
 *$py.class
@@ -13,7 +13,7 @@ htmlcov/
 venv/
 ENV/
 
-# Database & Runtime logs
+# Database & Runtime Logs
 *.db
 *.db-shm
 *.db-wal
@@ -22,18 +22,23 @@ coordinator.log
 coordinator_pid.json
 nodes_pids.json
 
-# Storage blobs (data plane runtime)
+# Storage Blobs & Chunks (Data Plane Runtime)
 storage/node*/*.blob
 storage/node*/*.tmp
+storage/node*/
 
-# Frontend (managed by Teja on main)
-frontend/
+# Frontend Dependencies & Build Output
+frontend/node_modules/
+frontend/dist/
+*.local
 
-# Secrets
+# Secrets & Environment
 .env
 .env.*
 !.env.example
 
-# IDE
+# IDE & OS Temporary Files
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
