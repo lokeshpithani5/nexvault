@@ -1,8 +1,0 @@
-# Root gitignore
-frontend/node_modules/
-frontend/dist/
-__pycache__/
-*.pyc
-.env
-.venv/
-storage/node*/
