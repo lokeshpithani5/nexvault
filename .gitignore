@@ -1,8 +1,44 @@
-# Root gitignore
+# Python & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+
+# Database & Runtime Logs
+*.db
+*.db-shm
+*.db-wal
+*.log
+coordinator.log
+coordinator_pid.json
+nodes_pids.json
+
+# Storage Blobs & Chunks (Data Plane Runtime)
+storage/node*/*.blob
+storage/node*/*.tmp
+storage/node*/
+
+# Frontend Dependencies & Build Output
 frontend/node_modules/
 frontend/dist/
-__pycache__/
-*.pyc
+*.local
+
+# Secrets & Environment
 .env
-.venv/
-storage/node*/
+.env.*
+!.env.example
+
+# IDE & OS Temporary Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
